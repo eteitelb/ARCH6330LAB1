@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#101615" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3f5f2" media="(prefers-color-scheme: light)">
+<title>ARCH 6330 Transect Lab</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Layout: one phone-width column. Live readings, then the psychrometric
+     field, then the four occupant sliders, then the 50-point temperature trace. */
+  :root {
+    --bg: #f3f5f2;
+    --surface: #ffffff;
+    --ink: #17211f;
+    --dim: #5d6b68;
+    --rule: #d5dbd7;
+    --air: #0f7c82;
+    --rad: #c8501e;
+    --ok: #1f9d5b;
+    --err: #c23b3b;
+    --sans: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101615;
+      --surface: #18201f;
+      --ink: #e6ecea;
+      --dim: #8b9996;
+      --rule: #2a3634;
+      --air: #4fc3c9;
+      --rad: #ff8a54;
+      --ok: #4cdd8a;
+      --err: #f07070;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.35;
+    padding-block: calc(14px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-bottom, 0px));
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+
+  header { display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; }
+  h1 { font-size: 1.3rem; font-weight: 700; font-stretch: 80%; letter-spacing: .05em; text-transform: uppercase; flex: 1; min-width: 0; }
+  .status { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: .7rem; color: var(--dim); white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+  .dot.live { background: var(--ok); animation: pulse 1.6s infinite; }
+  .dot.error { background: var(--err); }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+
+  .lbl { font-size: .66rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+
+  .readings { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .reading { display: flex; flex-direction: column; gap: 2px; padding: 2px 10px; min-width: 0; }
+  .reading + .reading { border-left: 1px solid var(--rule); }
+  .reading:first-child { padding-left: 0; }
+  .reading .val { font-family: var(--mono); font-size: 1.55rem; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .reading .val small { font-size: .7rem; color: var(--dim); font-weight: 400; margin-left: 2px; }
+  .reading.air .lbl { color: var(--air); }
+  .reading.rad .lbl { color: var(--rad); }
+
+  .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  .verdict { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .verdict .num { font-family: var(--mono); font-size: 1.25rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .verdict .band { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+  .swatch { width: 12px; height: 12px; border-radius: 2px; border: 1px solid rgba(0,0,0,.25); flex-shrink: 0; display: inline-block; }
+  .note { font-size: .74rem; color: var(--dim); font-family: var(--mono); min-height: 1.35em; }
+
+  canvas { display: block; width: 100%; }
+  #psych { touch-action: pan-y; cursor: crosshair; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .72rem; color: var(--dim); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+
+  .sliders { display: grid; grid-template-columns: 1fr; gap: 2px; }
+  @media (min-width: 620px) { .sliders { grid-template-columns: 1fr 1fr; column-gap: 24px; } }
+  .ctrl { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 10px; padding-top: 6px; }
+  .ctrl label { font-size: .82rem; font-weight: 600; }
+  .ctrl output { font-family: var(--mono); font-size: .86rem; font-variant-numeric: tabular-nums; }
+  .ctrl input[type=range] { grid-column: 1 / -1; width: 100%; height: 40px; accent-color: var(--ink); background: transparent; }
+  .ctrl input[type=range]:focus-visible { outline: 2px solid var(--air); outline-offset: 2px; border-radius: 4px; }
+
+  .trace-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .key { display: flex; gap: 14px; font-size: .76rem; font-weight: 600; }
+  .key i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .key .a { color: var(--air); } .key .a i { background: var(--air); }
+  .key .r { color: var(--rad); } .key .r i { background: var(--rad); }
+
+  [hidden] { display: none !important; }
+  .verdict-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+  .btn { font: inherit; font-weight: 600; font-size: .86rem; min-height: 44px; padding: 0 16px; border-radius: 6px;
+         border: 1px solid var(--ink); background: var(--ink); color: var(--bg); cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+  .btn.danger { background: transparent; color: var(--err); border-color: var(--err); }
+  .btn.small { min-height: 36px; padding: 0 12px; font-size: .78rem; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn:focus-visible, .pin:focus-visible { outline: 2px solid var(--air); outline-offset: 2px; }
+
+  .pins-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pins-actions { display: flex; gap: 8px; }
+  .pin { display: grid; grid-template-columns: 28px 1fr auto; gap: 1px 8px; align-items: center; text-align: left; width: 100%;
+         background: none; border: 0; border-top: 1px solid var(--rule); padding: 8px 0; color: inherit; font: inherit;
+         cursor: pointer; min-height: 48px; }
+  .pin .n { grid-row: span 2; font-family: var(--mono); font-size: .8rem; font-weight: 500; width: 24px; height: 24px;
+            display: flex; align-items: center; justify-content: center; border: 1.5px solid #000; color: #111; }
+  .pin .n.in { border-radius: 50%; }
+  .pin .nm { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .pin .nm em { font-style: normal; font-weight: 400; color: var(--dim); }
+  .pin .q { font-family: var(--mono); font-size: .78rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pin .meta { grid-column: 2 / -1; font-family: var(--mono); font-size: .7rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .empty { font-size: .8rem; color: var(--dim); border-top: 1px solid var(--rule); padding-top: 10px; }
+
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-start; justify-content: center;
+           z-index: 10; padding: calc(12px + env(safe-area-inset-top, 0px)) 12px 12px; }
+  .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 480px; border-radius: 10px; padding: 16px;
+           display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--rule); }
+  .sheet h2 { font-size: 1rem; font-weight: 700; font-stretch: 85%; letter-spacing: .04em; text-transform: uppercase; }
+  .sheet .field { display: flex; flex-direction: column; gap: 4px; }
+  .sheet input[type=text] { font: inherit; font-size: 16px; min-height: 46px; padding: 0 12px; border-radius: 6px;
+           border: 1px solid var(--rule); background: var(--bg); color: var(--ink); width: 100%; }
+  .sheet input[type=text]:focus-visible { outline: 2px solid var(--air); outline-offset: 1px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .seg label { position: relative; }
+  .seg input { position: absolute; opacity: 0; inset: 0; }
+  .seg span { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border: 1px solid var(--rule);
+           border-radius: 6px; font-weight: 600; cursor: pointer; }
+  .seg input:checked + span { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .seg input:focus-visible + span { outline: 2px solid var(--air); outline-offset: 2px; }
+  .seg i { width: 11px; height: 11px; border: 1.5px solid currentColor; display: inline-block; }
+  .seg i.in { border-radius: 50%; }
+  .sheet-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sheet-actions .grow { flex: 1; }
+  .err { color: var(--err); font-size: .78rem; min-height: 1.2em; }
+
+  footer { font-size: .68rem; color: var(--dim); line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>ARCH 6330 Transect Lab</h1>
+    <div class="status"><span id="status-msg">Connecting</span><span class="dot" id="conn-dot"></span></div>
+  </header>
+
+  <section class="readings" aria-label="Latest readings">
+    <div class="reading air"><span class="lbl">Air temp</span><span class="val"><span id="v-ta">--</span><small>°C</small></span></div>
+    <div class="reading rad"><span class="lbl">Radiant temp</span><span class="val"><span id="v-tr">--</span><small>°C</small></span></div>
+    <div class="reading"><span class="lbl">Rel. humidity</span><span class="val"><span id="v-rh">--</span><small>%</small></span></div>
+  </section>
+
+  <section class="panel">
+    <div class="verdict-row">
+      <div>
+        <div class="lbl">Net heat imbalance at the measured point</div>
+        <div class="verdict">
+          <span class="num" id="v-imb">-- W/m²</span>
+          <span class="band"><span class="swatch" id="v-sw" hidden></span><span id="v-band">Waiting for the first reading</span></span>
+        </div>
+      </div>
+      <button class="btn" id="mark-btn" type="button" disabled>Mark this reading</button>
+    </div>
+
+    <canvas id="psych" aria-label="Psychrometric chart coloured by Fanger net heat imbalance, with the measured air states plotted"></canvas>
+    <div class="note" id="probe">Tap a point to label it, or anywhere else to read the imbalance.</div>
+    <div class="legend" id="legend"></div>
+
+    <div class="sliders">
+      <div class="ctrl"><label for="s-clo">Clothing (clo)</label><output id="o-clo" for="s-clo">0.50</output>
+        <input type="range" id="s-clo" min="0" max="1" step="0.05" value="0.5"></div>
+      <div class="ctrl"><label for="s-met">Metabolic rate (met)</label><output id="o-met" for="s-met">1.2</output>
+        <input type="range" id="s-met" min="0.8" max="4" step="0.1" value="1.2"></div>
+      <div class="ctrl"><label for="s-w">Skin wettedness</label><output id="o-w" for="s-w">0.06</output>
+        <input type="range" id="s-w" min="0.06" max="1" step="0.01" value="0.06"></div>
+      <div class="ctrl"><label for="s-v">Air speed (m/s)</label><output id="o-v" for="s-v">0.10</output>
+        <input type="range" id="s-v" min="0.05" max="5" step="0.05" value="0.1"></div>
+    </div>
+
+    <div>
+      <div class="trace-head">
+        <span class="lbl">Last 50 readings</span>
+        <span class="key"><span class="a"><i></i>Air</span><span class="r"><i></i>Radiant</span></span>
+      </div>
+      <canvas id="trace" aria-label="Air temperature and radiant temperature over the last 50 readings"></canvas>
+    </div>
+
+    <div>
+      <div class="pins-head">
+        <span class="lbl">Labelled readings</span>
+        <span class="pins-actions">
+          <button class="btn ghost small" id="clear-btn" type="button" hidden>Clear all</button>
+          <button class="btn ghost small" id="csv-btn" type="button" hidden>Export CSV</button>
+        </span>
+      </div>
+      <div id="pins"></div>
+    </div>
+  </section>
+
+  <footer>
+    Fanger heat balance with skin wettedness · stress bands after Błażejczyk (MENEX) · 101.325 kPa.
+    The colour field uses the measured radiant temperature as MRT.
+  </footer>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <form class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" autocomplete="off">
+    <h2 id="sheet-title">Label reading</h2>
+    <div class="note" id="sheet-reading"></div>
+    <div class="field">
+      <label class="lbl" for="pin-name">Building</label>
+      <input type="text" id="pin-name" list="pin-names" maxlength="60" placeholder="e.g. Meyerson Hall" enterkeyhint="done">
+      <datalist id="pin-names"></datalist>
+    </div>
+    <div class="seg" role="radiogroup" aria-label="Inside or outside">
+      <label><input type="radio" name="pin-where" id="pin-in" value="in"><span><i class="in"></i>Inside</span></label>
+      <label><input type="radio" name="pin-where" id="pin-out" value="out" checked><span><i></i>Outside</span></label>
+    </div>
+    <div class="err" id="sheet-err"></div>
+    <div class="sheet-actions">
+      <button class="btn danger" id="pin-del" type="button" hidden>Delete</button>
+      <span class="grow"></span>
+      <button class="btn ghost" id="pin-cancel" type="button">Cancel</button>
+      <button class="btn" type="submit">Save</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  // ── Particle source (same device stream as the swine monitor) ──────
+  const PARTICLE_TOKEN = 'adbdaf8741bffcd7b6d90cbc0c9224bdf3072591';
+  const PARTICLE_EVENT = 'protoPig';
+
+  // ── State ──────────────────────────────────────────────────────────
+  const MAX_HISTORY = 50;
+  const history = [];                       // {ta, tr, rh, hr, ts}
+  const params = { clo: 0.5, met: 1.2, w: 0.06, v: 0.1 };
+  let mrt = 25, haveMrt = false;
+  let probePt = null;
+  let evtSource = null;
+
+  // labelled readings, saved in this browser only
+  const PIN_KEY = 'transect-lab-pins', LAST_KEY = 'transect-lab-last';
+  let pins = (() => { try { const a = JSON.parse(localStorage.getItem(PIN_KEY)); return Array.isArray(a) ? a : []; } catch (e) { return []; } })();
+  const savePins = () => { try { localStorage.setItem(PIN_KEY, JSON.stringify(pins)); } catch (e) {} };
+
+  // ── Psychrometrics ─────────────────────────────────────────────────
+  const P_ATM = 101325;
+  const DBT_MIN = 0, DBT_MAX = 45, HR_MIN = 0, HR_MAX = 30;   // °C, g/kg
+  const psat = t => 610.94 * Math.exp(17.625 * t / (t + 243.04));          // Pa
+  const hrFromPv = pv => 622 * pv / (P_ATM - pv);                           // g/kg
+  const pvFromHr = hr => (hr / 1000) * P_ATM / (0.622 + hr / 1000);         // Pa
+  const hrAt = (t, rh) => hrFromPv(psat(t) * rh / 100);
+
+  // ── Fanger heat balance → net imbalance, W/m² ──────────────────────
+  // Positive = body gaining heat. pa in Pa.
+  function heatImbalance(Tdb, pa, Tr, v, met, clo, w) {
+    const M = met * 58.15;
+    const Icl = 0.155 * clo;
+    const fcl = Icl <= 0.078 ? 1 + 1.29 * Icl : 1.05 + 0.645 * Icl;
+    const hcf = 12.1 * Math.sqrt(Math.max(v, 0.01));
+    const Tr4 = Math.pow(Tr + 273, 4);
+
+    let Tcl = Tdb + (35.5 - Tdb) / (3.5 * (6.45 * Icl + 0.1));
+    for (let i = 0; i < 60; i++) {
+      const hc = Math.max(hcf, 2.38 * Math.pow(Math.abs(Tcl - Tdb), 0.25));
+      const Tcl2 = 35.7 - 0.028 * M - Icl * (
+        3.96e-8 * fcl * (Math.pow(Tcl + 273, 4) - Tr4) + fcl * hc * (Tcl - Tdb));
+      if (Math.abs(Tcl2 - Tcl) < 0.001) break;
+      Tcl = 0.5 * Tcl + 0.5 * Tcl2;
+    }
+    const hc = Math.max(hcf, 2.38 * Math.pow(Math.abs(Tcl - Tdb), 0.25));
+
+    const Qrad  = 3.96e-8 * fcl * (Math.pow(Tcl + 273, 4) - Tr4);
+    const Qconv = fcl * hc * (Tcl - Tdb);
+    const Qskin = 3.05e-3 * (5733 - 6.99 * M - pa);
+    const Qsweat = w * Qskin * 6;
+    const Qmet  = 0.42 * (M - 58.15);
+    const QrespL = 1.7e-5 * M * (5867 - pa);
+    const QrespS = 0.0014 * M * (34 - Tdb);
+    return M - (Qrad + Qconv + Qskin + Qsweat + Qmet + QrespL + QrespS);
+  }
+
+  // a reading is always evaluated with its own measured radiant temperature
+  const imbalanceOf = p => heatImbalance(p.ta, pvFromHr(p.hr), Number.isFinite(p.tr) ? p.tr : mrt,
+                                         params.v, params.met, params.clo, params.w);
+
+  // ── Stress bands ───────────────────────────────────────────────────
+  const BANDS = [
+    { name: 'Cold stress',   range: '≤ −192',       rgb: [30, 63, 143] },
+    { name: 'Cool stress',   range: '−191 to −120', rgb: [79, 134, 214] },
+    { name: 'Slightly cool', range: '−119 to −58',  rgb: [168, 205, 240] },
+    { name: 'Neutral',       range: '−57 to 33',    rgb: [223, 232, 210] },
+    { name: 'Slightly warm', range: '34 to 95',     rgb: [246, 213, 138] },
+    { name: 'Mild stress',   range: '96 to 179',    rgb: [232, 128, 106] },
+    { name: 'Heat stress',   range: '≥ 180',        rgb: [139, 0, 0] }
+  ];
+  const EDGES = [-192, -120, -58, 34, 96, 180];
+  const FEATHER = 6;
+  function bandIndex(q) { let k = 0; while (k < EDGES.length && q >= EDGES[k]) k++; return k; }
+  function bandColor(q) {
+    for (let k = 0; k < EDGES.length; k++) {
+      const d = q - EDGES[k];
+      if (d >= -FEATHER && d < FEATHER) {
+        const t = (d + FEATHER) / (2 * FEATHER), a = BANDS[k].rgb, b = BANDS[k + 1].rgb;
+        return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+      }
+    }
+    return BANDS[bandIndex(q)].rgb;
+  }
+  const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const fmtQ = q => (q >= 0 ? '+' : '−') + Math.abs(Math.round(q)) + ' W/m²';
+
+  document.getElementById('legend').innerHTML = BANDS.map(b =>
+    `<span><i class="swatch" style="background:${css(b.rgb)}"></i>${b.name} ${b.range}</span>`).join('');
+
+  // ── Canvas helpers ─────────────────────────────────────────────────
+  const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function fit(canvas, h) {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth;
+    canvas.style.height = h + 'px';
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  // ── Psychrometric chart ────────────────────────────────────────────
+  const psych = document.getElementById('psych');
+  const PAD = { l: 8, r: 34, t: 8, b: 34 };
+  const FW = 150, FH = 110;
+  const field = document.createElement('canvas'); field.width = FW; field.height = FH;
+  let geo = null;
+
+  function renderField() {
+    const fctx = field.getContext('2d'), img = fctx.createImageData(FW, FH), d = img.data;
+    for (let j = 0; j < FH; j++) {
+      const pa = pvFromHr(HR_MAX - (j + 0.5) / FH * (HR_MAX - HR_MIN));
+      for (let i = 0; i < FW; i++) {
+        const t = DBT_MIN + (i + 0.5) / FW * (DBT_MAX - DBT_MIN);
+        const c = bandColor(heatImbalance(t, pa, mrt, params.v, params.met, params.clo, params.w));
+        const k = (j * FW + i) * 4;
+        d[k] = c[0]; d[k + 1] = c[1]; d[k + 2] = c[2]; d[k + 3] = 255;
+      }
+    }
+    fctx.putImageData(img, 0, 0);
+  }
+
+  function drawPsych() {
+    const cw = psych.clientWidth;
+    const { ctx, w, h } = fit(psych, Math.round(Math.min(Math.max(cw * 0.8, 250), 460)));
+    const pw = w - PAD.l - PAD.r, ph = h - PAD.t - PAD.b;
+    const X = t => PAD.l + (t - DBT_MIN) / (DBT_MAX - DBT_MIN) * pw;
+    const Y = hr => PAD.t + (1 - (hr - HR_MIN) / (HR_MAX - HR_MIN)) * ph;
+    geo = { pw, ph };
+    const ink = tok('--ink'), dim = tok('--dim'), rule = tok('--rule');
+    ctx.clearRect(0, 0, w, h);
+
+    // saturation boundary
+    const sat = new Path2D();
+    sat.moveTo(X(DBT_MIN), Y(HR_MIN));
+    for (let t = DBT_MIN; t <= DBT_MAX + 1e-6; t += 0.25) sat.lineTo(X(t), Y(Math.min(hrAt(t, 100), HR_MAX)));
+    sat.lineTo(X(DBT_MAX), Y(HR_MIN)); sat.closePath();
+
+    ctx.save(); ctx.clip(sat);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(field, PAD.l, PAD.t, pw, ph);
+
+    // grid
+    ctx.strokeStyle = 'rgba(20,30,28,.16)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let t = DBT_MIN; t <= DBT_MAX; t += 5) { ctx.moveTo(X(t), PAD.t); ctx.lineTo(X(t), PAD.t + ph); }
+    for (let g = HR_MIN; g <= HR_MAX; g += 5) { ctx.moveTo(PAD.l, Y(g)); ctx.lineTo(PAD.l + pw, Y(g)); }
+    ctx.stroke();
+
+    // RH curves
+    ctx.font = `500 10px ${tok('--mono')}`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    [20, 40, 60, 80].forEach(rh => {
+      ctx.strokeStyle = 'rgba(20,30,28,.42)'; ctx.beginPath();
+      let lx = null, ly = null;
+      for (let t = DBT_MIN; t <= DBT_MAX + 1e-6; t += 0.5) {
+        const g = hrAt(t, rh);
+        if (g > HR_MAX) break;
+        t === DBT_MIN ? ctx.moveTo(X(t), Y(g)) : ctx.lineTo(X(t), Y(g));
+        lx = X(t); ly = Y(g);
+      }
+      ctx.stroke();
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.6)';
+      ctx.strokeText(rh + '%', lx - 4, ly + 12); ctx.lineWidth = 1;
+      ctx.fillStyle = '#17211f'; ctx.fillText(rh + '%', lx - 4, ly + 12);
+    });
+    ctx.restore();
+
+    ctx.strokeStyle = ink; ctx.lineWidth = 1.5; ctx.stroke(sat);
+
+    // axes: dry bulb along the bottom, humidity ratio on the right
+    ctx.fillStyle = dim; ctx.font = `10px ${tok('--mono')}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let t = DBT_MIN; t <= DBT_MAX; t += 5) ctx.fillText(t, Math.min(Math.max(X(t), 8), w - PAD.r), PAD.t + ph + 5);
+    ctx.fillText('Dry bulb °C', PAD.l + pw / 2, PAD.t + ph + 19);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    for (let g = HR_MIN + 5; g <= HR_MAX; g += 5) ctx.fillText(g, PAD.l + pw + 6, Y(g));
+    ctx.textBaseline = 'top'; ctx.fillText('g/kg', PAD.l + pw + 6, PAD.t + ph + 19);
+    ctx.textAlign = 'left'; ctx.fillStyle = dim;
+    ctx.fillText('MRT ' + mrt.toFixed(1) + ' °C' + (haveMrt ? '' : ' (default)'), PAD.l + 4, PAD.t + 4);
+
+    // measured trail: unlabelled readings as small dots, labelled ones as numbered markers
+    const inPlot = p => p.ta >= DBT_MIN && p.ta <= DBT_MAX && p.hr <= HR_MAX;
+    const pts = history.filter(inPlot);
+    const pinned = new Set(pins.map(p => p.id));
+    if (pts.length > 1) {
+      ctx.strokeStyle = 'rgba(17,24,23,.45)'; ctx.lineWidth = 1; ctx.beginPath();
+      pts.forEach((p, i) => i ? ctx.lineTo(X(p.ta), Y(p.hr)) : ctx.moveTo(X(p.ta), Y(p.hr)));
+      ctx.stroke();
+    }
+    pts.forEach((p, i) => {
+      if (pinned.has(p.id)) return;
+      const last = i === pts.length - 1;
+      ctx.beginPath(); ctx.arc(X(p.ta), Y(p.hr), last ? 6.5 : 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = css(BANDS[bandIndex(imbalanceOf(p))].rgb); ctx.fill();
+      ctx.lineWidth = last ? 2 : 1; ctx.strokeStyle = '#000'; ctx.stroke();
+    });
+    ctx.font = `600 11px ${tok('--mono')}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    pins.forEach((p, i) => {
+      if (!inPlot(p)) return;
+      const x = X(p.ta), y = Y(p.hr), r = 6;
+      ctx.beginPath();
+      p.where === 'in' ? ctx.arc(x, y, r + 0.5, 0, Math.PI * 2) : ctx.rect(x - r, y - r, 2 * r, 2 * r);
+      ctx.fillStyle = css(BANDS[bandIndex(imbalanceOf(p))].rgb); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke();
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.strokeText(i + 1, x + 8, y - 6);
+      ctx.fillStyle = '#000'; ctx.fillText(i + 1, x + 8, y - 6);
+    });
+
+    // probe crosshair
+    if (probePt) {
+      const x = X(probePt.t), y = Y(probePt.hr);
+      ctx.strokeStyle = '#17211f'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, PAD.t + ph); ctx.moveTo(x, y); ctx.lineTo(PAD.l + pw, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+    }
+    void rule;
+  }
+
+  function probeAt(e) {
+    if (!geo) return;
+    const r = psych.getBoundingClientRect();
+    const t = DBT_MIN + (e.clientX - r.left - PAD.l) / geo.pw * (DBT_MAX - DBT_MIN);
+    const hr = HR_MIN + (1 - (e.clientY - r.top - PAD.t) / geo.ph) * (HR_MAX - HR_MIN);
+    if (t < DBT_MIN || t > DBT_MAX || hr < HR_MIN || hr > HR_MAX || hr > hrAt(t, 100)) return;
+    probePt = { t, hr };
+    updateProbe(); drawPsych();
+  }
+  function updateProbe() {
+    if (!probePt) return;
+    const pa = pvFromHr(probePt.hr);
+    const q = heatImbalance(probePt.t, pa, mrt, params.v, params.met, params.clo, params.w);
+    document.getElementById('probe').textContent =
+      `Probe ${probePt.t.toFixed(1)} °C · ${probePt.hr.toFixed(1)} g/kg · ${Math.round(100 * pa / psat(probePt.t))}% RH → ${fmtQ(q)}, ${BANDS[bandIndex(q)].name.toLowerCase()}`;
+  }
+  // nearest reading within a fingertip of the tap, labelled ones first
+  function hitTest(e) {
+    if (!geo) return null;
+    const r = psych.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const ids = new Set(pins.map(p => p.id));
+    let best = null, bd = 24 * 24;
+    pins.concat(history.filter(p => !ids.has(p.id))).forEach(p => {
+      const x = PAD.l + (p.ta - DBT_MIN) / (DBT_MAX - DBT_MIN) * geo.pw;
+      const y = PAD.t + (1 - (p.hr - HR_MIN) / (HR_MAX - HR_MIN)) * geo.ph;
+      const d = (x - mx) * (x - mx) + (y - my) * (y - my);
+      if (d < bd || (d === bd && best && p.id > best.id && !ids.has(best.id))) { bd = d; best = p; }
+    });
+    return best;
+  }
+  psych.addEventListener('click', e => { const hit = hitTest(e); hit ? openSheet(hit) : probeAt(e); });
+  psych.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') probeAt(e); });
+
+  // ── Labelling ──────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const f1 = v => Number.isFinite(v) ? v.toFixed(1) : '--';
+  let sheetTarget = null;
+
+  function openSheet(reading) {
+    sheetTarget = reading;
+    const existing = pins.find(p => p.id === reading.id);
+    let last = {};
+    try { last = JSON.parse(localStorage.getItem(LAST_KEY)) || {}; } catch (e) {}
+    const src = existing || last;
+    $('sheet-title').textContent = existing ? 'Edit label' : 'Label reading';
+    $('sheet-reading').textContent = `${reading.ts} · air ${f1(reading.ta)} °C · radiant ${f1(reading.tr)} °C · ${f1(reading.rh)}% RH`;
+    $('pin-name').value = src.name || '';
+    $(src.where === 'in' ? 'pin-in' : 'pin-out').checked = true;
+    $('pin-names').innerHTML = [...new Set(pins.map(p => p.name))].map(n => `<option value="${esc(n)}">`).join('');
+    $('pin-del').hidden = !existing;
+    $('sheet-err').textContent = '';
+    $('scrim').hidden = false;
+    if (!$('pin-name').value) $('pin-name').focus();
+  }
+  function closeSheet() { $('scrim').hidden = true; sheetTarget = null; }
+
+  $('sheet').addEventListener('submit', e => {
+    e.preventDefault();
+    if (!sheetTarget) return;
+    const name = $('pin-name').value.trim(), where = $('pin-in').checked ? 'in' : 'out';
+    if (!name) { $('sheet-err').textContent = 'Enter a building name.'; $('pin-name').focus(); return; }
+    const existing = pins.find(p => p.id === sheetTarget.id);
+    if (existing) { existing.name = name; existing.where = where; }
+    else {
+      const r = sheetTarget;
+      pins.push({ id: r.id, ta: r.ta, tr: r.tr, rh: r.rh, hr: r.hr, ts: r.ts, iso: r.iso, name, where });
+      pins.sort((a, b) => a.id - b.id);
+    }
+    savePins();
+    try { localStorage.setItem(LAST_KEY, JSON.stringify({ name, where })); } catch (err) {}
+    closeSheet(); refresh(false);
+  });
+  $('pin-del').addEventListener('click', () => {
+    if (sheetTarget) { pins = pins.filter(p => p.id !== sheetTarget.id); savePins(); }
+    closeSheet(); refresh(false);
+  });
+  $('pin-cancel').addEventListener('click', closeSheet);
+  $('scrim').addEventListener('click', e => { if (e.target === $('scrim')) closeSheet(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('scrim').hidden) closeSheet(); });
+  $('mark-btn').addEventListener('click', () => { if (history.length) openSheet(history[history.length - 1]); });
+
+  function renderPins() {
+    const box = $('pins');
+    $('csv-btn').hidden = $('clear-btn').hidden = !pins.length;
+    if (!pins.length) {
+      box.innerHTML = '<div class="empty">No labelled readings yet. Use Mark this reading, or tap a point on the chart. Labels are saved on this phone.</div>';
+      return;
+    }
+    box.innerHTML = pins.map((p, i) => {
+      const q = imbalanceOf(p), b = BANDS[bandIndex(q)];
+      return `<button class="pin" type="button" data-id="${p.id}">
+        <span class="n ${p.where === 'in' ? 'in' : ''}" style="background:${css(b.rgb)};${bandIndex(q) === 0 || bandIndex(q) === 6 ? 'color:#fff;' : ''}">${i + 1}</span>
+        <span class="nm">${esc(p.name)} <em>· ${p.where === 'in' ? 'inside' : 'outside'}</em></span>
+        <span class="q">${fmtQ(q)}</span>
+        <span class="meta">${esc(p.ts)} · air ${f1(p.ta)} · radiant ${f1(p.tr)} °C · ${f1(p.rh)}% · ${b.name.toLowerCase()}</span>
+      </button>`;
+    }).join('');
+  }
+  $('pins').addEventListener('click', e => {
+    const row = e.target.closest('.pin'); if (!row) return;
+    const p = pins.find(x => String(x.id) === row.dataset.id); if (p) openSheet(p);
+  });
+
+  let clearArmed = null;
+  $('clear-btn').addEventListener('click', () => {
+    const btn = $('clear-btn');
+    if (clearArmed) { clearTimeout(clearArmed); clearArmed = null; btn.textContent = 'Clear all'; pins = []; savePins(); refresh(false); return; }
+    btn.textContent = 'Tap again to clear';
+    clearArmed = setTimeout(() => { clearArmed = null; btn.textContent = 'Clear all'; }, 3000);
+  });
+
+  $('csv-btn').addEventListener('click', () => {
+    const cell = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const num = (v, d) => Number.isFinite(v) ? v.toFixed(d) : '';
+    const rows = [['number', 'building', 'location', 'time', 'air_temp_C', 'radiant_temp_C', 'rh_pct', 'humidity_ratio_g_kg',
+                   'imbalance_W_m2', 'band', 'clo', 'met', 'skin_wettedness', 'air_speed_m_s']];
+    pins.forEach((p, i) => {
+      const q = imbalanceOf(p);
+      rows.push([i + 1, p.name, p.where === 'in' ? 'inside' : 'outside', p.iso || p.ts, num(p.ta, 2), num(p.tr, 2), num(p.rh, 1),
+                 num(p.hr, 2), num(q, 1), BANDS[bandIndex(q)].name, params.clo, params.met, params.w, params.v]);
+    });
+    const url = URL.createObjectURL(new Blob([rows.map(r => r.map(cell).join(',')).join('\n') + '\n'], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'transect-lab-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  });
+
+  // ── Verdict at the measured point ──────────────────────────────────
+  function updateVerdict() {
+    const p = history[history.length - 1];
+    if (!p) return;
+    const q = imbalanceOf(p);
+    const b = BANDS[bandIndex(q)];
+    document.getElementById('v-imb').textContent = fmtQ(q);
+    document.getElementById('v-band').textContent = b.name;
+    const sw = document.getElementById('v-sw'); sw.hidden = false; sw.style.background = css(b.rgb);
+  }
+
+  // ── Temperature trace: last 50 readings ────────────────────────────
+  const trace = document.getElementById('trace');
+  function drawTrace() {
+    const { ctx, w, h } = fit(trace, 150);
+    const pad = { l: 30, r: 44, t: 10, b: 20 };
+    const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+    const dim = tok('--dim'), rule = tok('--rule'), mono = tok('--mono');
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = `10px ${mono}`;
+    if (!history.length) {
+      ctx.fillStyle = dim; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('The trace starts with the first reading.', w / 2, h / 2);
+      return;
+    }
+    const all = history.flatMap(p => [p.ta, p.tr]).filter(Number.isFinite);
+    let lo = Math.floor(Math.min(...all) - 0.5), hi = Math.ceil(Math.max(...all) + 0.5);
+    if (hi - lo < 2) hi = lo + 2;
+    const X = i => pad.l + (MAX_HISTORY - history.length + i) / (MAX_HISTORY - 1) * iw;
+    const Y = v => pad.t + (1 - (v - lo) / (hi - lo)) * ih;
+
+    ctx.strokeStyle = rule; ctx.lineWidth = 1; ctx.fillStyle = dim;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    [lo, (lo + hi) / 2, hi].forEach(v => {
+      ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(pad.l + iw, Y(v)); ctx.stroke();
+      ctx.fillText(Number.isInteger(v) ? v : v.toFixed(1), pad.l - 5, Y(v));
+    });
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'right'; ctx.fillText(history[history.length - 1].ts, pad.l + iw, pad.t + ih + 6);
+    if (history.length > 12) { ctx.textAlign = 'left'; ctx.fillText(history[0].ts, Math.max(X(0), pad.l), pad.t + ih + 6); }
+
+    const ends = [];
+    [['ta', tok('--air')], ['tr', tok('--rad')]].forEach(([k, col]) => {
+      const pts = history.map((p, i) => [X(i), p[k]]).filter(p => Number.isFinite(p[1]));
+      if (!pts.length) return;
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+      pts.forEach((p, i) => i ? ctx.lineTo(p[0], Y(p[1])) : ctx.moveTo(p[0], Y(p[1])));
+      ctx.stroke();
+      const e = pts[pts.length - 1];
+      ctx.beginPath(); ctx.arc(e[0], Y(e[1]), 3.5, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+      ends.push({ y: Y(e[1]), v: e[1], col });
+    });
+    if (ends.length === 2 && Math.abs(ends[0].y - ends[1].y) < 12) {
+      const up = ends[0].y <= ends[1].y ? 0 : 1, mid = (ends[0].y + ends[1].y) / 2;
+      ends[up].y = mid - 6; ends[1 - up].y = mid + 6;
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = `500 11px ${mono}`;
+    ends.forEach(e => { ctx.fillStyle = e.col; ctx.fillText(e.v.toFixed(1), pad.l + iw + 7, e.y); });
+  }
+
+  // ── Redraw scheduling ──────────────────────────────────────────────
+  let pending = false, fieldDirty = true;
+  function refresh(dirty) {
+    if (dirty) fieldDirty = true;
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      if (fieldDirty) { renderField(); fieldDirty = false; }
+      drawPsych(); drawTrace(); updateVerdict(); updateProbe(); renderPins();
+    });
+  }
+
+  // ── Sliders ────────────────────────────────────────────────────────
+  [['clo', 2], ['met', 1], ['w', 2], ['v', 2]].forEach(([k, dp]) => {
+    const el = document.getElementById('s-' + k), out = document.getElementById('o-' + k);
+    const sync = () => { params[k] = parseFloat(el.value); out.textContent = params[k].toFixed(dp); };
+    sync();
+    el.addEventListener('input', () => { sync(); refresh(true); });
+  });
+
+  // ── Readings ───────────────────────────────────────────────────────
+  function applyReading(d) {
+    const ta = parseFloat(d.air_temp), rh = parseFloat(d.rh), tr = parseFloat(d.radiant_temp);
+    if (!Number.isFinite(ta) || !Number.isFinite(rh)) throw new Error('missing air_temp or rh');
+    const now = new Date();
+    const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    let id = now.getTime();
+    if (history.length && id <= history[history.length - 1].id) id = history[history.length - 1].id + 1;
+    history.push({ id, ta, tr, rh, hr: hrAt(ta, rh), ts, iso: now.toISOString() });
+    document.getElementById('mark-btn').disabled = false;
+    if (history.length > MAX_HISTORY) history.shift();
+    document.getElementById('v-ta').textContent = ta.toFixed(1);
+    document.getElementById('v-rh').textContent = rh.toFixed(1);
+    let dirty = false;
+    if (Number.isFinite(tr)) {
+      document.getElementById('v-tr').textContent = tr.toFixed(1);
+      dirty = !haveMrt || Math.abs(tr - mrt) >= 0.05;
+      mrt = tr; haveMrt = true;
+    }
+    refresh(dirty);
+  }
+
+  // ── Particle event stream ──────────────────────────────────────────
+  function setStatus(msg, state) {
+    document.getElementById('status-msg').textContent = msg;
+    document.getElementById('conn-dot').className = 'dot' + (state ? ' ' + state : '');
+  }
+  function connect() {
+    if (evtSource) evtSource.close();
+    const url = `https://api.particle.io/v1/events/${encodeURIComponent(PARTICLE_EVENT)}?access_token=${encodeURIComponent(PARTICLE_TOKEN)}`;
+    setStatus('Connecting', '');
+    evtSource = new EventSource(url);
+    evtSource.addEventListener(PARTICLE_EVENT, e => {
+      try {
+        applyReading(JSON.parse(JSON.parse(e.data).data));
+        setStatus(history[history.length - 1].ts, 'live');
+      } catch (err) {
+        setStatus('Unreadable event', 'error');
+      }
+    });
+    evtSource.onopen = () => setStatus(history.length ? history[history.length - 1].ts : 'Waiting for data', 'live');
+    evtSource.onerror = () => setStatus('Reconnecting', 'error');
+  }
+
+  // keep the phone awake in the field where the browser allows it
+  async function keepAwake() {
+    try { if (navigator.wakeLock && document.visibilityState === 'visible') await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', keepAwake);
+
+  window.addEventListener('resize', () => refresh(false));
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => refresh(false));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => refresh(false));
+  window.addEventListener('load', () => { refresh(true); connect(); keepAwake(); });
+</script>
+</body>
+</html>
