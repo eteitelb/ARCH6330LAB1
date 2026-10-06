@@ -159,7 +159,7 @@
 
   <section class="readings" aria-label="Latest readings">
     <div class="reading air"><span class="lbl">Air temp</span><span class="val"><span id="v-ta">--</span><small>°C</small></span></div>
-    <div class="reading rad"><span class="lbl">Radiant temp</span><span class="val"><span id="v-tr">--</span><small>°C</small></span></div>
+    <div class="reading rad"><span class="lbl">Surface temp</span><span class="val"><span id="v-tr">--</span><small>°C</small></span></div>
     <div class="reading"><span class="lbl">Rel. humidity</span><span class="val"><span id="v-rh">--</span><small>%</small></span></div>
   </section>
 
@@ -193,9 +193,9 @@
     <div>
       <div class="trace-head">
         <span class="lbl">Last 50 readings</span>
-        <span class="key"><span class="a"><i></i>Air</span><span class="r"><i></i>Radiant</span></span>
+        <span class="key"><span class="a"><i></i>Air</span><span class="r"><i></i>Surface</span></span>
       </div>
-      <canvas id="trace" aria-label="Air temperature and radiant temperature over the last 50 readings"></canvas>
+      <canvas id="trace" aria-label="Air temperature and surface temperature over the last 50 readings"></canvas>
     </div>
 
     <div>
@@ -212,7 +212,7 @@
 
   <footer>
     Fanger heat balance with skin wettedness · stress bands after Błażejczyk (MENEX) · 101.325 kPa.
-    The colour field uses the measured radiant temperature as MRT.
+    The colour field uses the measured surface temperature as MRT.
   </footer>
 </div>
 
@@ -294,7 +294,7 @@
     return M - (Qrad + Qconv + Qskin + Qsweat + Qmet + QrespL + QrespS);
   }
 
-  // a reading is always evaluated with its own measured radiant temperature
+  // a reading is always evaluated with its own measured surface temperature
   const imbalanceOf = p => heatImbalance(p.ta, pvFromHr(p.hr), Number.isFinite(p.tr) ? p.tr : mrt,
                                          params.v, params.met, params.clo, params.w);
 
@@ -502,7 +502,7 @@
     try { last = JSON.parse(localStorage.getItem(LAST_KEY)) || {}; } catch (e) {}
     const src = existing || last;
     $('sheet-title').textContent = existing ? 'Edit label' : 'Label reading';
-    $('sheet-reading').textContent = `${reading.ts} · air ${f1(reading.ta)} °C · radiant ${f1(reading.tr)} °C · ${f1(reading.rh)}% RH`;
+    $('sheet-reading').textContent = `${reading.ts} · air ${f1(reading.ta)} °C · surface ${f1(reading.tr)} °C · ${f1(reading.rh)}% RH`;
     $('pin-name').value = src.name || '';
     $(src.where === 'in' ? 'pin-in' : 'pin-out').checked = true;
     $('pin-names').innerHTML = [...new Set(pins.map(p => p.name))].map(n => `<option value="${esc(n)}">`).join('');
@@ -551,7 +551,7 @@
         <span class="n ${p.where === 'in' ? 'in' : ''}" style="background:${css(b.rgb)};${bandIndex(q) === 0 || bandIndex(q) === 6 ? 'color:#fff;' : ''}">${i + 1}</span>
         <span class="nm">${esc(p.name)} <em>· ${p.where === 'in' ? 'inside' : 'outside'}</em></span>
         <span class="q">${fmtQ(q)}</span>
-        <span class="meta">${esc(p.ts)} · air ${f1(p.ta)} · radiant ${f1(p.tr)} °C · ${f1(p.rh)}% · ${b.name.toLowerCase()}</span>
+        <span class="meta">${esc(p.ts)} · air ${f1(p.ta)} · surface ${f1(p.tr)} °C · ${f1(p.rh)}% · ${b.name.toLowerCase()}</span>
       </button>`;
     }).join('');
   }
